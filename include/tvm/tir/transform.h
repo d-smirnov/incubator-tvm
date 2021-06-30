@@ -25,10 +25,12 @@
 #define TVM_TIR_TRANSFORM_H_
 
 #include <tvm/ir/transform.h>
+#include <tvm/relay/expr.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/function.h>
 
 #include <string>
+#include <vector>
 
 namespace tvm {
 namespace tir {
@@ -430,6 +432,8 @@ TVM_DLL Pass LegalizePackedCalls();
  * \return The pass.
  */
 TVM_DLL Pass FlattenBuffer();
+
+TVM_DLL Pass BindParams(const std::vector<const relay::ConstantNode*>& constants);
 
 }  // namespace transform
 }  // namespace tir

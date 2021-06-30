@@ -35,6 +35,7 @@
 #include <tvm/te/operation.h>
 #include <tvm/te/schedule.h>
 #include <tvm/te/schedule_pass.h>
+#include <tvm/tir/transform.h>
 #include <tvm/topi/tags.h>
 
 #include <functional>
@@ -221,10 +222,17 @@ class CompileEngineImpl : public CompileEngineNode {
     for (te::Tensor arg : cfunc->outputs) {
       all_args.push_back(arg);
     }
+    std::vector<const ConstantNode*> all_consts;
+    for (auto kv : cfunc->constant_tensors) {
+      all_args.push_back(kv.second);
+      all_consts.push_back(kv.first);
+    }
+
     // lower the function
     std::unordered_map<te::Tensor, tir::Buffer> binds;
     auto func_name = cfunc->prim_fn_var->name_hint;
     cfunc->funcs->Update(tvm::LowerSchedule(cfunc->schedule, all_args, func_name, binds));
+    cfunc->funcs->Update(tir::transform::BindParams(all_consts)(cfunc->funcs));
     value->cached_func = cfunc;
 
     return value;

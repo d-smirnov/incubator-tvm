@@ -144,6 +144,7 @@ struct CachedFuncNode : public Object {
   tvm::Array<Integer> shape_func_param_states;
   /*! \brief The lowered functions to support the function. */
   IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({}));
+  std::unordered_map<const ConstantNode*, te::Tensor> constant_tensors;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("target", &target);
@@ -164,7 +165,8 @@ class CachedFunc : public ObjectRef {
   CachedFunc(tvm::Target target, GlobalVar prim_fn_name, tvm::Array<te::Tensor> inputs,
              tvm::Array<te::Tensor> outputs, te::Schedule schedule,
              tvm::Array<Integer> shape_func_param_states,
-             IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({})));
+             IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({})),
+             std::unordered_map<const ConstantNode*, te::Tensor> constant_tensors = {});
 
  public:
   TVM_DEFINE_OBJECT_REF_METHODS(CachedFunc, ObjectRef, CachedFuncNode);

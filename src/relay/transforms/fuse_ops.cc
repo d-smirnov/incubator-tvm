@@ -84,6 +84,7 @@ constexpr uint32_t kMaxFusedOps = 256;
 static const Op& stop_fusion_op = Op::Get("annotation.stop_fusion");
 
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.FuseOps.max_depth", Integer);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.FuseOps.link_params", Bool);
 
 /*!
  * \brief Indexed data flow graph in forward direction.
@@ -808,8 +809,31 @@ std::vector<GraphPartitioner::Group*> GraphPartitioner::Partition(
 
 class FuseMutator : private MixedModeMutator {
  public:
+  int GetFuseOptLevel() { return fuse_opt_level_; }
+  size_t GetMaxFuseDepth() { return max_fuse_depth_; }
+  bool GetLinkParams() { return link_params_; }
+
+  FuseMutator* SetFuseOptLevel(int fuse_opt_level) {
+    fuse_opt_level_ = fuse_opt_level;
+    return this;
+  }
+  FuseMutator* SetMaxFuseDepth(size_t max_fuse_depth) {
+    max_fuse_depth_ = max_fuse_depth;
+    return this;
+  }
+  FuseMutator* SetLinkParams(bool link_params) {
+    link_params_ = link_params;
+    return this;
+  }
+
   // Run the transform
-  Expr Transform(const Expr& body, int fuse_opt_level, size_t max_fuse_depth) {
+  Expr Transform(const Expr& body) {
+    return Transform(body, GetFuseOptLevel(), GetMaxFuseDepth(), GetLinkParams());
+  }
+
+ protected:
+  // Run the transform
+  Expr Transform(const Expr& body, int fuse_opt_level, size_t max_fuse_depth, bool link_params) {
     // setup the group map.
     auto graph = IndexedForwardGraph::Create(&arena_, body);
     auto groups = GraphPartitioner(&arena_, fuse_opt_level, max_fuse_depth).Partition(graph);
@@ -823,6 +847,10 @@ class FuseMutator : private MixedModeMutator {
   }
 
  private:
+  int fuse_opt_level_;
+  size_t max_fuse_depth_;
+  bool link_params_;
+
   using MixedModeMutator::VisitExpr_;
 
   /*! \brief Temporary information from each group. */
@@ -992,8 +1020,12 @@ class FuseMutator : private MixedModeMutator {
       auto type = arg->checked_type();
       Expr new_arg = this->Mutate(arg);
       if (current_group != arg_group) {
-        Var param = ginfo_[current_group].GetOrAllocParam(new_arg, type);
-        new_args.push_back(param);
+        if (!GetLinkParams() || new_arg.as<ConstantNode>() == nullptr) {
+          Var param = ginfo_[current_group].GetOrAllocParam(new_arg, type);
+          new_args.push_back(param);
+        } else {
+          new_args.push_back(new_arg);
+        }
       } else {
         new_args.push_back(new_arg);
       }
@@ -1015,8 +1047,13 @@ class FuseMutator : private MixedModeMutator {
   }
 };
 
-Expr FuseOps(const Expr& expr, int fuse_opt_level, size_t max_fuse_depth, const IRModule& module) {
-  return FuseMutator().Transform(expr, fuse_opt_level, max_fuse_depth);
+Expr FuseOps(const Expr& expr, int fuse_opt_level, size_t max_fuse_depth, bool link_params,
+             const IRModule& module) {
+  return FuseMutator()
+      .SetFuseOptLevel(fuse_opt_level)
+      ->SetMaxFuseDepth(max_fuse_depth)
+      ->SetLinkParams(link_params)
+      ->Transform(expr);
 }
 
 namespace transform {
@@ -1024,9 +1061,17 @@ namespace transform {
 Pass FuseOps(int fuse_opt_level) {
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function f, IRModule m, PassContext pc) {
+        auto target = Target::Current();
+
+        bool link_params = false;
+        link_params = target.defined()
+                          ? target->GetAttr<Bool>("link-params").value_or(Bool(link_params))
+                          : link_params;
+        link_params = pc->GetConfig("relay.FuseOps.link_params", Bool(link_params)).value();
+
         int opt_level = fuse_opt_level == -1 ? pc->opt_level : fuse_opt_level;
         auto max_fuse_depth = pc->GetConfig("relay.FuseOps.max_depth", Integer(kMaxFusedOps));
-        return Downcast<Function>(FuseOps(f, opt_level, max_fuse_depth.value(), m));
+        return Downcast<Function>(FuseOps(f, opt_level, max_fuse_depth.value(), link_params, m));
       };
   return CreateFunctionPass(pass_func, 1, "FuseOps", {"InferType"});
 }

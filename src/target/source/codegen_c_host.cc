@@ -372,21 +372,9 @@ runtime::Module BuildCHost(IRModule mod, Target target) {
   cg.Init(output_ssa, emit_asserts, target->str());
 
   Map<String, LinkedParam> linked_params;
-  bool found_linked_params = false;
-  bool could_have_linked_params = target->GetAttr<Bool>("link-params").value_or(Bool(false));
   PrimFunc aot_executor_fn;
 
   for (auto kv : mod->functions) {
-    if (could_have_linked_params &&
-        kv.first->name_hint == ::tvm::runtime::symbol::tvm_lookup_linked_param) {
-      Map<String, ObjectRef> attrs_dict = Downcast<Map<String, ObjectRef>>(kv.second->attrs->dict);
-      CHECK(attrs_dict.find(::tvm::tir::attr::kLinkedParams) != attrs_dict.end())
-          << "no " << ::tvm::tir::attr::kLinkedParams << " attribute found!";
-      linked_params =
-          Downcast<Map<String, LinkedParam>>(attrs_dict[::tvm::tir::attr::kLinkedParams]);
-      found_linked_params = true;
-      continue;
-    }
     // Make sure that the executor function is the last one to be code generated so that all the
     // symbols are available to tvm_run_func
     auto fun_name = std::string(kv.first->name_hint);
@@ -401,18 +389,6 @@ runtime::Module BuildCHost(IRModule mod, Target target) {
     auto f = Downcast<PrimFunc>(kv.second);
     cg.AddFunction(f);
   }
-
-  if (could_have_linked_params && !aot_executor_fn.defined()) {
-    ICHECK(found_linked_params) << "-link-params given but none found";
-    cg.DeclareParameters(linked_params);
-    cg.LinkParameters(linked_params);
-  }
-
-  if (could_have_linked_params && aot_executor_fn.defined()) {
-    cg.DeclareParameters(linked_params);
-    cg.AddFunction(aot_executor_fn);
-  }
-
   if (target->GetAttr<Bool>("system-lib").value_or(Bool(false))) {
     ICHECK_EQ(target->GetAttr<String>("runtime").value_or(""), "c")
         << "c target only supports generating C runtime SystemLibs";

@@ -392,7 +392,13 @@ class RelayBuildModule : public runtime::ModuleNode {
     }
 
     // Fuse the operations if it is needed.
-    relay_module = transform::FuseOps()(relay_module);
+    if (targets.size() == 1) {
+      const auto& it = targets.begin();
+      With<Target> tctx((*it).second);
+      relay_module = transform::FuseOps()(relay_module);
+    } else {
+      relay_module = transform::FuseOps()(relay_module);
+    }
 
     // Do layout rewrite for auto-scheduler.
     if (backend::IsAutoSchedulerEnabled() && targets.size() == 1) {
@@ -539,28 +545,6 @@ class RelayBuildModule : public runtime::ModuleNode {
     ret_.params = executor_codegen_->GetParams();
 
     auto lowered_funcs = executor_codegen_->GetIRModule();
-
-    // Generate a placeholder function that attaches linked params as its arguments.
-    if (target_host->GetAttr<Bool>("link-params").value_or(Bool(false))) {
-      CHECK(pf != nullptr) << "Unable to link-params with no target_host and no llvm codegen.";
-      auto param_ids = executor_codegen_->GetParamIds();
-      auto link_params = Map<String, tir::LinkedParam>();
-      for (auto param : ret_.params) {
-        link_params.Set(param.first, tir::LinkedParam(param_ids[param.first], param.second));
-      }
-
-      Map<String, ObjectRef> dict;
-      dict.Set(tvm::tir::attr::kLinkedParams, link_params);
-      dict.Set(tvm::attr::kGlobalSymbol, String(::tvm::runtime::symbol::tvm_lookup_linked_param));
-      DictAttrs attrs{dict};
-      auto prim = tir::PrimFunc(Array<tir::Var>(), tir::SeqStmt(Array<tir::Stmt>()), VoidType(),
-                                Map<tir::Var, tir::Buffer>(), attrs);
-      if (lowered_funcs.find(target_host->str()) == lowered_funcs.end()) {
-        lowered_funcs.Set(target_host->str(), IRModule(Map<GlobalVar, BaseFunc>({})));
-      }
-      lowered_funcs[target_host->str()]->Add(
-          GlobalVar(::tvm::runtime::symbol::tvm_lookup_linked_param), prim);
-    }
 
     // When there is no lowered_funcs due to reasons such as optimization.
     if (lowered_funcs.size() == 0) {

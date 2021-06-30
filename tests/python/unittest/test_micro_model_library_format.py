@@ -104,12 +104,12 @@ def validate_graph_json(extract_dir, factory):
 @pytest.mark.parametrize(
     "target",
     [
-        ("graph", tvm.target.target.micro("host")),
-        ("aot", tvm.target.target.micro("host", options="-executor=aot")),
+        ("graph", tvm.target.target.micro("host"), 8),
+        ("aot", tvm.target.target.micro("host", options="-executor=aot --link-params"), 0),
     ],
 )
 def test_export_model_library_format_c(target):
-    executor, _target = target
+    executor, _target, _json_constants_size_bytes = target
     with utils.TempDirectory.set_keep_for_debug(True):
         with tvm.transform.PassContext(opt_level=3, config={"tir.disable_vectorize": True}):
             relay_mod = tvm.parser.fromtext(
@@ -157,7 +157,7 @@ def test_export_model_library_format_c(target):
                 ]
             assert metadata["memory"]["functions"]["main"] == [
                 {
-                    "constants_size_bytes": 8,
+                    "constants_size_bytes": _json_constants_size_bytes,
                     "device": 1,
                     "io_size_bytes": 18,
                     "workspace_size_bytes": 0,
@@ -182,7 +182,10 @@ def test_export_model_library_format_c(target):
 
         with open(os.path.join(extract_dir, "parameters", "add.params"), "rb") as params_f:
             params = tvm.relay.load_param_dict(params_f.read())
-            assert "p0" in params
+            if _json_constants_size_bytes != 0:
+                assert "p0" in params
+            else:
+                assert len(params) == 0
 
 
 @tvm.testing.requires_micro
